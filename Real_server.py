@@ -63,7 +63,7 @@ class Server:
             # Option selection loop: stays connected and keeps prompting until valid option is chosen
             joined = False
             while not joined:
-                conn.sendall(b"\nOptions:\n1. Join chat room\n2. Private messages\n3. Play Text Adventure\nEnter option (1, 2, or 3): ")
+                conn.sendall(b"\nOptions:\n1. Join chat room\n2. Private messages\n3. \nEnter option (1, 2, or 3): ")
                 option = conn.recv(1024).decode().strip()
                 if option == '1':
                     self.chat_room.join(username, conn)
@@ -72,17 +72,13 @@ class Server:
                     self.private_room.join(username, conn)
                     joined = True
                 elif option == '3':
-                    self.start_text_adventure(conn)
+                    
                     joined = True
                 else:
                     conn.sendall(b"Invalid option. Please enter 1, 2, or 3.\n")
             # After joining, keep connection open for further logic (not implemented)
-            while True:
-                data = conn.recv(1024)
-                if not data:
-                    break
-                # Echo back for now
-                conn.sendall(data)
+            # Only echo if not in Text Adventure mode (handled inside start_text_adventure)
+            # (No-op here for now)
         except Exception as e:
             print(f"[ERROR] {addr}: {e}")
         finally:
@@ -93,7 +89,7 @@ class Server:
                 print(f"[LEAVE] {addr} disconnected. Total: {len(self.clients)}")
             conn.close()
 
-    def start_text_adventure(self, conn):
+    def start_text_adventure(self, username, conn):
         import subprocess
         import os
         conn.sendall(b"[TextAdventure] Starting game...\n")
@@ -102,15 +98,64 @@ class Server:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             script_path = os.path.join(base_dir, 'FunGames', 'TextAdventure.py')
             proc = subprocess.Popen(
-                ['python3', script_path],
+                ['python3', '-u', script_path],
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True
+                text=True,
+                bufsize=1
             )
-            for line in proc.stdout:
-                conn.sendall(line.encode())
-            proc.wait()
-            conn.sendall(b"[TextAdventure] Game ended.\n")
+            stop_event = threading.Event()
+            first_line_received = threading.Event()
+
+            def pump_output():
+                try:
+                    for line in proc.stdout:
+                        if not line:
+                            break
+                        if not first_line_received.is_set():
+                            print(f"[GAME] First output from game for '{username}': {line.strip()}")
+                            first_line_received.set()
+                        try:
+                            conn.sendall(line.encode())
+                        except Exception:
+                            break
+                finally:
+                    stop_event.set()
+
+            threading.Thread(target=pump_output, daemon=True).start()
+            # Send initial newline to trigger prompt/output
+            try:
+                proc.stdin.write('\n')
+                proc.stdin.flush()
+            except Exception:
+                pass
+            conn.sendall(f"[TextAdventure] Interactive mode for {username}. Type /exit to return.\n".encode())
+            while not stop_event.is_set():
+                try:
+                    data = conn.recv(1024)
+                except Exception:
+                    break
+                if not data:
+                    break
+                msg = data.decode().rstrip('\r\n')
+                if msg == '/exit':
+                    print(f"[GAME] User '{username}' exiting Text Adventure.")
+                    proc.terminate()
+                    break
+                # Forward user input to game
+                try:
+                    proc.stdin.write(msg + '\n')
+                    proc.stdin.flush()
+                except Exception:
+                    break
+            # Ensure process ends
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+            conn.sendall(f"[TextAdventure] Game ended for {username}.\n".encode())
+            print(f"[GAME] Text Adventure ended for '{username}'.")
         except Exception as e:
             conn.sendall(f"[TextAdventure] Error: {e}\n".encode())
 
