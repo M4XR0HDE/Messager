@@ -17,7 +17,6 @@ class ChatRoom:
         else:
             msg += f"[ChatRoom {self.room_id}] No previous messages.\n"
         msg += "Type your messages. Type /leave to exit the chat room.\n"
-        msg += f"[{self.room_id}] You: "
         conn.sendall(msg.encode())
 
     def broadcast(self, sender, message):
@@ -92,9 +91,9 @@ class Server:
                         "1. Join chat room\n"
                         "2. Private messages\n"
                         "3. List online users\n"
-                        "4. Exit\n"
-                        "Enter option (1, 2, 3, or 4): ")
+                        "4. Exit\n")
                 conn.sendall(menu.encode())
+                conn.sendall(b"Enter option (1, 2, 3, or 4): ")
                 option = conn.recv(1024).decode().strip()
                 if option == '1':
                     conn.sendall(b"Enter chat room number (1-4): ")
@@ -108,7 +107,6 @@ class Server:
                 elif option == '2':
                     self.private_room.join(username, conn)
                     # For now, just acknowledge and return to menu
-
                 elif option == '3':
                     with self.lock:
                         user_list = ', '.join(self.usernames) if self.usernames else 'No users online.'
@@ -130,22 +128,24 @@ class Server:
 
     def handle_chat_room(self, username, conn, room):
         try:
+            # Always send the prompt after joining and after each message
             first = True
             while True:
-                if not first:
+                if first:
                     conn.sendall(f"[{room.room_id}] You: ".encode())
-                else:
                     first = False
                 data = conn.recv(1024)
                 if not data:
                     break
                 msg = data.decode().strip()
                 if not msg:
-                    continue  # Ignore empty input
+                    # Do nothing, do not re-send the prompt
+                    continue  # Ignore empty input, prompt remains unchanged
                 if msg.lower() == '/leave':
                     conn.sendall(b"[ChatRoom] Leaving chat room.\n")
                     break
                 room.broadcast(username, msg)
+                conn.sendall(f"[{room.room_id}] You: ".encode())
         except Exception:
             pass
         finally:
