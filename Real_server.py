@@ -34,6 +34,7 @@ class ChatRoom:
     def remove(self, username, conn):
         self.members.discard((username, conn))
 
+
 class PrivateRoom:
     def __init__(self):
         self.members = set()
@@ -107,6 +108,7 @@ class Server:
                 elif option == '2':
                     self.private_room.join(username, conn)
                     # For now, just acknowledge and return to menu
+
                 elif option == '3':
                     with self.lock:
                         user_list = ', '.join(self.usernames) if self.usernames else 'No users online.'
@@ -148,6 +150,77 @@ class Server:
             pass
         finally:
             room.remove(username, conn)
+    #postboned for now
+    def start_text_adventure(self, username, conn):
+        import subprocess
+        import os
+        conn.sendall(b"[TextAdventure] Starting game...\n")
+        try:
+            # Resolve absolute path to TextAdventure.py
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            script_path = os.path.join(base_dir, 'FunGames', 'TextAdventure.py')
+            proc = subprocess.Popen(
+                ['python3', '-u', script_path],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+            stop_event = threading.Event()
+            first_line_received = threading.Event()
+
+            def pump_output():
+                try:
+                    for line in proc.stdout:
+                        if not line:
+                            break
+                        if not first_line_received.is_set():
+                            print(f"[GAME] First output from game for '{username}': {line.strip()}")
+                            first_line_received.set()
+                        try:
+                            conn.sendall(line.encode())
+                        except Exception:
+                            break
+                finally:
+                    stop_event.set()
+
+            threading.Thread(target=pump_output, daemon=True).start()
+            # Send initial newline to trigger prompt/output
+            try:
+                proc.stdin.write('\n')
+                proc.stdin.flush()
+            except Exception:
+                pass
+            conn.sendall(f"[TextAdventure] Interactive mode for {username}. Type /exit to return.\n".encode())
+            while not stop_event.is_set():
+                try:
+                    data = conn.recv(1024)
+                except Exception:
+                    break
+                if not data:
+                    break
+                msg = data.decode().rstrip('\r\n')
+                if msg == '/exit':
+                    print(f"[GAME] User '{username}' exiting Text Adventure.")
+                    proc.terminate()
+                    break
+                # Forward user input to game
+                try:
+                    proc.stdin.write(msg + '\n')
+                    proc.stdin.flush()
+                except Exception:
+                    break
+            # Ensure process ends
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+            conn.sendall(f"[TextAdventure] Game ended for {username}.\n".encode())
+            print(f"[GAME] Text Adventure ended for '{username}'.")
+        except Exception as e:
+            conn.sendall(f"[TextAdventure] Error: {e}\n".encode())
+
 
     def wait_for_exit(self):
         while True:
