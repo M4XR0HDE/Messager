@@ -7,13 +7,20 @@ def main():
 	with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 		s.connect((HOST, PORT))
 		print(f"Connected to server at {HOST}:{PORT}")
-		msg = input("Enter message to send (or just press Enter to disconnect): ")
-		if msg:
-			s.sendall(msg.encode())
-			# Wait for echo from server
+		while True:
+			# Receive prompt from server
 			data = s.recv(1024)
-			print(f"Received echo: {data.decode()}")
-		print("Disconnecting...")
+			if not data:
+				print("Server closed the connection.")
+				break
+			print(data.decode(), end='')
+			# Get user input and send to server
+			user_input = input()
+			if user_input.lower() in ('exit', 'quit'):
+				print("Disconnecting...")
+				break
+			s.sendall(user_input.encode())
+
 
 if __name__ == "__main__":
 	main()
