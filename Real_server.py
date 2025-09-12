@@ -1,5 +1,18 @@
 import socket
+import threading
 
+class Server:
+    def __init__(self, host='0.0.0.0', port=65432):
+        self.host = host
+        self.port = port
+        self.clients = set()
+        self.lock = threading.Lock()
+        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server.bind((self.host, self.port))
+        self.server.listen()
+        print(f"Server listening on {self.host}:{self.port}")
+        print("Type 'exit' and press Enter to stop the server.")
 
 HOST = '0.0.0.0'
 PORT = 65432
