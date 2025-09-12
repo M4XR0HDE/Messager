@@ -1,0 +1,58 @@
+## Logging Features Added:
+
+### 1. **Dual Logging System**
+- **General Server Log**: Records all server operations, errors, and debug information
+- **User Activity Log**: Specifically tracks user actions (joins, leaves, messages)
+
+### 2. **Log Levels**
+- **DEBUG**: Detailed technical information for troubleshooting
+- **INFO**: General operational information
+- **WARNING**: Issues that don't break functionality but should be noted
+- **ERROR**: Errors that affect functionality
+- **CRITICAL**: Severe errors that might cause the server to fail
+
+### 3. **File Organization**
+- Logs are saved to a `logs/` directory (created automatically)
+- Daily log rotation with timestamps in filenames
+- Separate files for general server logs and user activity logs
+
+### 4. **What Gets Logged**
+
+**User Activities:**
+- User connections/disconnections with session duration
+- Username selection attempts
+- Chat room joins/leaves with duration and message counts
+- Menu option selections
+- Private room access
+
+**Server Operations:**
+- Server startup/shutdown
+- Connection attempts and failures
+- Message broadcasting success/failure rates
+- Chat room creation and member counts
+- Error handling and recovery
+
+**Technical Details:**
+- Network connection issues
+- Data transmission errors
+- Process management for text adventures
+- Resource cleanup operations
+
+### 5. **Console + File Output**
+- Important information is displayed on console
+- All details are saved to log files
+- Different formatting for console vs file logs
+
+## Usage:
+
+The logging system starts automatically when you run the server. Log files will be created in the `logs/` directory with names like:
+- `server_20241215.log` - General server operations
+- `user_activity_20241215.log` - User-specific activities
+
+The logging provides valuable insights for:
+- **Debugging**: Track down issues with detailed error logs
+- **Monitoring**: See server performance and user engagement
+- **Analytics**: Understand user behavior patterns
+- **Security**: Monitor connection attempts and user activities
+
+The system is production-ready and handles log rotation, error recovery, and resource management automatically!
