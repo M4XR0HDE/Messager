@@ -5,7 +5,7 @@ import threading
 import json
 
 
-HOST = '127.0.0.1'  # Change to server IP if needed
+HOST = '217.154.27.85'  # Change to server IP if needed
 PORT = 65432
 
 
@@ -124,8 +124,6 @@ class BlobClient:
                     if not line.strip():
                         continue
                     msg = json.loads(line)
-                    # Debug: print received data
-                    print('Received from server:', msg)
                     # Private message
                     if 'private_from' in msg and 'msg' in msg:
                         self.open_private_chat(msg['private_from'], msg['msg'])
