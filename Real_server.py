@@ -1,31 +1,6 @@
 import socket
 import threading
 
-class Server:
-    def __init__(self, host='0.0.0.0', port=65432):
-        self.host = host
-        self.port = port
-        self.clients = set()
-        self.lock = threading.Lock()
-        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server.bind((self.host, self.port))
-        self.server.listen()
-        print(f"Server listening on {self.host}:{self.port}")
-        print("Type 'exit' and press Enter to stop the server.")
-
-HOST = '0.0.0.0'
-PORT = 65432
-def main():
-    print(f"Server listening on {HOST}:{PORT}")
-    print("Type 'exit' and press Enter to stop the server.")
-  
-
-if __name__ == "__main__":
-    main()
-import socket
-import threading
-
 class ChatRoom:
     def __init__(self):
         self.members = set()
@@ -86,17 +61,22 @@ class Server:
                 self.clients.add(addr)
                 print(f"[JOIN] {addr} as {username} connected. Total: {len(self.clients)}")
             # Option selection loop: stays connected and keeps prompting until valid option is chosen
-            while True:
-                conn.sendall(b"\nOptions:\n1. Join chat room\n2. Private messages\nEnter option (1 or 2): ")
+            joined = False
+            while not joined:
+                conn.sendall(b"\nOptions:\n1. Join chat room\n2. Private messages\n3. List online users\nEnter option (1, 2, or 3): ")
                 option = conn.recv(1024).decode().strip()
                 if option == '1':
                     self.chat_room.join(username, conn)
-                    break
+                    joined = True
                 elif option == '2':
                     self.private_room.join(username, conn)
-                    break
+                    joined = True
+                elif option == '3':
+                    with self.lock:
+                        user_list = ', '.join(self.usernames) if self.usernames else 'No users online.'
+                    conn.sendall(f"[Server] Online users: {user_list}\n".encode())
                 else:
-                    conn.sendall(b"Invalid option. Please enter 1 or 2.\n")
+                    conn.sendall(b"Invalid option. Please enter 1, 2, or 3.\n")
             # After joining, keep connection open for further logic (not implemented)
             while True:
                 data = conn.recv(1024)
