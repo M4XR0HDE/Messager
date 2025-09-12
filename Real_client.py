@@ -1,6 +1,6 @@
 import socket
 
-HOST = '127.0.0.1'  # Server address
+HOST = '217.154.27.85'  # Server address
 PORT = 65432        # Server port
 
 def main():

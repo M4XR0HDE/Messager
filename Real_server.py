@@ -74,17 +74,21 @@ class Server:
                 self.clients.add(addr)
                 print(f"[JOIN] {addr} as {username} connected. Total: {len(self.clients)}")
             # Option selection loop: stays connected and keeps prompting until valid option is chosen
-            while True:
-                conn.sendall(b"\nOptions:\n1. Join chat room\n2. Private messages\nEnter option (1 or 2): ")
+            joined = False
+            while not joined:
+                conn.sendall(b"\nOptions:\n1. Join chat room\n2. Private messages\n3. Play Text Adventure\nEnter option (1, 2, or 3): ")
                 option = conn.recv(1024).decode().strip()
                 if option == '1':
                     self.chat_room.join(username, conn)
-                    break
+                    joined = True
                 elif option == '2':
                     self.private_room.join(username, conn)
-                    break
+                    joined = True
+                elif option == '3':
+                    self.start_text_adventure(conn)
+                    joined = True
                 else:
-                    conn.sendall(b"Invalid option. Please enter 1 or 2.\n")
+                    conn.sendall(b"Invalid option. Please enter 1, 2, or 3.\n")
             # After joining, keep connection open for further logic (not implemented)
             while True:
                 data = conn.recv(1024)
@@ -101,6 +105,24 @@ class Server:
                     self.usernames.discard(username)
                 print(f"[LEAVE] {addr} disconnected. Total: {len(self.clients)}")
             conn.close()
+
+    def start_text_adventure(self, conn):
+        import subprocess
+        conn.sendall(b"[TextAdventure] Starting game...\n")
+        try:
+            proc = subprocess.Popen(
+                ['python3', 'FunGames/TextAdventure.py'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                cwd='.',  # Use current directory
+                text=True
+            )
+            for line in proc.stdout:
+                conn.sendall(line.encode())
+            proc.wait()
+            conn.sendall(b"[TextAdventure] Game ended.\n")
+        except Exception as e:
+            conn.sendall(f"[TextAdventure] Error: {e}\n".encode())
 
     def wait_for_exit(self):
         while True:
