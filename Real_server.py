@@ -63,7 +63,7 @@ class Server:
             # Option selection loop: stays connected and keeps prompting until valid option is chosen
             joined = False
             while not joined:
-                conn.sendall(b"\nOptions:\n1. Join chat room\n2. Private messages\n3. \nEnter option (1, 2, or 3): ")
+                conn.sendall(b"\nOptions:\n1. Join chat room\n2. Private messages\n3. List online users\nEnter option (1, 2, or 3): ")
                 option = conn.recv(1024).decode().strip()
                 if option == '1':
                     self.chat_room.join(username, conn)
@@ -72,8 +72,10 @@ class Server:
                     self.private_room.join(username, conn)
                     joined = True
                 elif option == '3':
-                    
-                    joined = True
+                    with self.lock:
+                        user_list = ', '.join(self.usernames) if self.usernames else 'No users online.'
+                    conn.sendall(f"[Server] Online users: {user_list}\n".encode())
+
                 else:
                     conn.sendall(b"Invalid option. Please enter 1, 2, or 3.\n")
             # After joining, keep connection open for further logic (not implemented)
