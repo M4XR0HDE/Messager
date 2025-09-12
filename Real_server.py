@@ -14,18 +14,6 @@ class Server:
         print(f"Server listening on {self.host}:{self.port}")
         print("Type 'exit' and press Enter to stop the server.")
 
-HOST = '0.0.0.0'
-PORT = 65432
-def main():
-    print(f"Server listening on {HOST}:{PORT}")
-    print("Type 'exit' and press Enter to stop the server.")
-  
-
-if __name__ == "__main__":
-    main()
-import socket
-import threading
-
 class ChatRoom:
     def __init__(self):
         self.members = set()
