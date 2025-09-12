@@ -38,21 +38,34 @@ class BlobClient:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((HOST, PORT))
         self.nick = nick
-        # Wait for our client id from the server before sending position
+        # Wait for our client id from the server before sending position (newline-delimited JSON)
         self.my_id = None
+        buffer = ''
         try:
             while self.my_id is None:
                 data = self.sock.recv(4096)
-                msg = json.loads(data.decode())
-                if 'your_id' in msg:
-                    self.my_id = msg['your_id']
-        except:
-            pass
+                if not data:
+                    break
+                buffer += data.decode()
+                while '\n' in buffer:
+                    line, buffer = buffer.split('\n', 1)
+                    if not line.strip():
+                        continue
+                    try:
+                        msg = json.loads(line)
+                        print('[DEBUG] Initial handshake message from server:', msg)
+                        if 'your_id' in msg:
+                            self.my_id = msg['your_id']
+                            break
+                    except Exception as e:
+                        print('[DEBUG] Failed to parse initial handshake line:', line, e)
+        except Exception as e:
+            print('[DEBUG] Exception during handshake:', e)
         # Send our nickname to the server
         try:
-            self.sock.sendall(json.dumps({'nick': self.nick}).encode())
-        except:
-            pass
+            self.sock.sendall((json.dumps({'nick': self.nick}) + '\n').encode())
+        except Exception as e:
+            print('[DEBUG] Failed to send nickname:', e)
         # Now start listening to server and allow movement
         threading.Thread(target=self.listen_server, daemon=True).start()
         self.master.bind('<Up>', lambda e: self.move(0, -MOVE_STEP))
