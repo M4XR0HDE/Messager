@@ -1,19 +1,6 @@
 import socket
 import threading
 
-class Server:
-    def __init__(self, host='0.0.0.0', port=65432):
-        self.host = host
-        self.port = port
-        self.clients = set()
-        self.lock = threading.Lock()
-        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server.bind((self.host, self.port))
-        self.server.listen()
-        print(f"Server listening on {self.host}:{self.port}")
-        print("Type 'exit' and press Enter to stop the server.")
-
 class ChatRoom:
     def __init__(self):
         self.members = set()
@@ -108,13 +95,16 @@ class Server:
 
     def start_text_adventure(self, conn):
         import subprocess
+        import os
         conn.sendall(b"[TextAdventure] Starting game...\n")
         try:
+            # Resolve absolute path to TextAdventure.py
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            script_path = os.path.join(base_dir, 'FunGames', 'TextAdventure.py')
             proc = subprocess.Popen(
-                ['python3', 'FunGames/TextAdventure.py'],
+                ['python3', script_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                cwd='.',  # Use current directory
                 text=True
             )
             for line in proc.stdout:
