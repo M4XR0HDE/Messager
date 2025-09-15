@@ -1,10 +1,39 @@
 import socket
 import threading
 from typing import Dict, Set, Optional
+import subprocess
 
 class ChatRoom:
-    def __init__(self):
-        self.members: Set[str] = set()
+    def __init__(self, room_id):
+        self.room_id = room_id
+        self.members = set()  # set of (username, conn)
+        self.history = []     # list of (username, message)
+
+    def join(self, username, conn):
+        self.members.add((username, conn))
+        msg = f"[ChatRoom {self.room_id}] You joined chat room {self.room_id}!\n"
+        if self.history:
+            msg += f"[ChatRoom {self.room_id}] Previous messages:\n"
+            for user, m in self.history:
+                msg += f"{user}: {m}\n"
+        else:
+            msg += f"[ChatRoom {self.room_id}] No previous messages.\n"
+        msg += "Type your messages. Type /leave to exit the chat room.\n"
+        conn.sendall(msg.encode())
+
+    def broadcast(self, sender, message):
+        if not message.strip():
+            return  # Ignore empty messages
+        self.history.append((sender, message))
+        for user, conn in list(self.members):
+            try:
+                if user != sender:
+                    conn.sendall(f"[{self.room_id}] {sender}: {message}\n".encode())
+            except Exception:
+                pass
+
+    def remove(self, username, conn):
+        self.members.discard((username, conn))
 
     def join(self, username: str, conn: socket.socket):
         self.members.add(username)
@@ -84,43 +113,25 @@ class Server:
 
             # Main interaction loop
             while True:
-                mode = self.mode_by_user.get(username, "menu")
-                if mode == "menu":
-                    self.send_menu(conn)
-                    option = self.recv_line(conn)
-                    if option == "1":
-                        self.chat_room.join(username, conn)
-                        self.mode_by_user[username] = "chatroom"
-                        conn.sendall(b"[ChatRoom] Type your messages. Use /menu to return.\n")
-                    elif option == "2":
-                        self.private_room.join(username, conn)
-                        self.mode_by_user[username] = "private"
-                        self.handle_private_selection(username, conn)
-                    elif option == "3":
-                        self.start_text_adventure(conn)
-                        # After game ends, return to menu
-                        self.mode_by_user[username] = "menu"
+                menu = ("\nOptions:\n"
+                        "1. Join chat room\n"
+                        "2. Private messages\n"
+                        "3. List online users\n"
+                        "4. Exit\n")
+                conn.sendall(menu.encode())
+                conn.sendall(b"Enter option (1, 2, 3, or 4): ")
+                option = conn.recv(1024).decode().strip()
+                if option == '1':
+                    conn.sendall(b"Enter chat room number (1-4): ")
+                    room_choice = conn.recv(1024).decode().strip()
+                    if room_choice in self.chat_rooms:
+                        room = self.chat_rooms[room_choice]
+                        room.join(username, conn)
+                        self.handle_chat_room(username, conn, room)
                     else:
-                        conn.sendall(b"Invalid option. Please enter 1, 2, or 3.\n")
-                        continue
-
-                # Data loop for chat modes
-                data = conn.recv(1024)
-                if not data:
-                    break
-                msg = data.decode(errors="ignore").rstrip("\n")
-
-                # Commands from any mode
-                if msg == "/menu":
-                    self.leave_private_if_any(username)
-                    self.mode_by_user[username] = "menu"
-                    continue
-
-                if self.mode_by_user.get(username) == "chatroom":
-                    # Simple echo to sender for now
-                    conn.sendall(f"[You in ChatRoom] {msg}\n".encode())
-
-                elif self.mode_by_user.get(username) == "private":
+                        conn.sendall(b"Invalid room number.\n")
+                elif option == '2':
+                    self.private_room.join(username, conn)
                     partner = self.private_partner.get(username)
                     if partner is None:
                         # Not paired yet, try to (user could type recipient name directly)
@@ -136,7 +147,6 @@ class Server:
                     else:
                         conn.sendall(b"[Private] Partner went offline. Returning to menu.\n")
                         self.leave_private_if_any(username)
-                        self.mode_by_user[username] = "menu"
 
         except Exception as e:
             print(f"[ERROR] {addr}: {e}")
@@ -156,15 +166,30 @@ class Server:
             except Exception:
                 pass
 
-    def send_menu(self, conn: socket.socket):
-        menu = (
-            "\nOptions:\n"
-            "1. Join chat room\n"
-            "2. Private messages\n"
-            "3. Play Text Adventure\n"
-            "Enter option (1, 2, or 3): "
-        )
-        conn.sendall(menu.encode())
+    def handle_chat_room(self, username, conn, room):
+        try:
+            # Always send the prompt after joining and after each message
+            first = True
+            while True:
+                if first:
+                    conn.sendall(f"[{room.room_id}] You: ".encode())
+                    first = False
+                data = conn.recv(1024)
+                if not data:
+                    break
+                msg = data.decode().strip()
+                if not msg:
+                    # Do nothing, do not re-send the prompt
+                    continue  # Ignore empty input, prompt remains unchanged
+                if msg.lower() == '/leave':
+                    conn.sendall(b"[ChatRoom] Leaving chat room.\n")
+                    break
+                room.broadcast(username, msg)
+                conn.sendall(f"[{room.room_id}] You: ".encode())
+        except Exception:
+            pass
+        finally:
+            room.remove(username, conn)
 
     def handle_private_selection(self, username: str, conn: socket.socket, typed_candidate: Optional[str] = None):
         """List users, pick a recipient, pair both, then stay in private mode.
@@ -230,8 +255,9 @@ class Server:
             return ""
         return data.decode(errors="ignore").strip()
 
+        #postboned for now  
     def start_text_adventure(self, conn: socket.socket):
-        import subprocess
+        
         conn.sendall(b"[TextAdventure] Starting game...\n")
         try:
             proc = subprocess.Popen(
