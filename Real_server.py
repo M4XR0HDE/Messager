@@ -2,6 +2,56 @@ import socket
 import threading
 from typing import Dict, Set, Optional
 import subprocess
+import os
+import logging
+import datetime
+
+def setup_logging():
+    """Set up logging configuration with both file and console output"""
+    # Create logs directory if it doesn't exist
+    if not os.path.exists('logs'):
+        os.makedirs('logs')
+
+    # Create formatters
+    detailed_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    simple_formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s'
+    )
+
+    # Create file handler for all logs
+    file_handler = logging.FileHandler(
+        f'logs/server_{datetime.datetime.now().strftime("%Y%m%d")}.log')
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(detailed_formatter)
+
+    # Create separate file handler for user activities
+    user_activity_handler = logging.FileHandler(
+        f'logs/user_activity_{datetime.datetime.now().strftime("%Y%m%d")}.log')
+    user_activity_handler.setLevel(logging.INFO)
+    user_activity_handler.setFormatter(detailed_formatter)
+
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(simple_formatter)
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
+    # Create user activity logger
+    user_logger = logging.getLogger('user_activity')
+    user_logger.addHandler(user_activity_handler)
+    user_logger.propagate = False  # Don't propagate to root logger
+
+    return logging.getLogger(__name__), user_logger
+
+# Initialize loggers
+logger, user_logger = setup_logging()
 
 class ChatRoom:
     def __init__(self, room_id):
@@ -35,10 +85,6 @@ class ChatRoom:
     def remove(self, username, conn):
         self.members.discard((username, conn))
 
-    def join(self, username: str, conn: socket.socket):
-        self.members.add(username)
-        conn.sendall(b"[ChatRoom] You joined the chat room!\n")
-
 class PrivateRoom:
     """Logical placeholder, real routing is handled by Server via partner mapping."""
     def __init__(self):
@@ -68,12 +114,11 @@ class Server:
         self.private_partner: Dict[str, Optional[str]] = {}  # user -> partner or None
         self.mode_by_user: Dict[str, str] = {}  # "menu" | "chatroom" | "private"
 
-        # Rooms
-        self.chat_room = ChatRoom()
-        self.private_room = PrivateRoom()
 
-        print(f"Server listening on {self.host}:{self.port}")
-        print("Type 'exit' and press Enter to stop the server.")
+
+        # Rooms: create 4 chat rooms with IDs 1-4
+        self.chat_rooms = {str(i): ChatRoom(str(i)) for i in range(1, 5)}
+        self.private_room = PrivateRoom()
 
     def start(self):
         threading.Thread(target=self.wait_for_exit, daemon=True).start()
@@ -93,6 +138,7 @@ class Server:
             # Pick unique username
             while True:
                 username = conn.recv(1024).decode(errors="ignore").strip()
+                logger.info(f"[INPUT] {addr} entered username: {username}")
                 if not username:
                     conn.sendall(b"Username cannot be empty. Try again: ")
                     continue
@@ -105,11 +151,12 @@ class Server:
                         self.user_by_conn[conn] = username
                         self.private_partner[username] = None
                         self.mode_by_user[username] = "menu"
+                        user_logger.info(f"[JOIN] {username} ({addr}) connected.")
                         break
 
             with self.lock:
                 self.addr_clients.add(addr)
-                print(f"[JOIN] {addr} as {username} connected. Total: {len(self.addr_clients)}")
+                logger.info(f"[JOIN] {addr} as {username} connected. Total: {len(self.addr_clients)}")
 
             # Main interaction loop
             while True:
@@ -121,35 +168,74 @@ class Server:
                 conn.sendall(menu.encode())
                 conn.sendall(b"Enter option (1, 2, 3, or 4): ")
                 option = conn.recv(1024).decode().strip()
+                logger.info(f"[INPUT] {username}@{addr} selected option: {option}")
+                user_logger.info(f"[MENU] {username} selected option: {option}")
                 if option == '1':
                     conn.sendall(b"Enter chat room number (1-4): ")
                     room_choice = conn.recv(1024).decode().strip()
+                    logger.info(f"[INPUT] {username}@{addr} chose chat room: {room_choice}")
+                    user_logger.info(f"[CHATROOM] {username} chose chat room: {room_choice}")
                     if room_choice in self.chat_rooms:
                         room = self.chat_rooms[room_choice]
                         room.join(username, conn)
+                        user_logger.info(f"[CHATROOM] {username} joined chat room {room_choice}")
                         self.handle_chat_room(username, conn, room)
                     else:
                         conn.sendall(b"Invalid room number.\n")
+                        logger.warning(f"[WARN] {username}@{addr} entered invalid chat room: {room_choice}")
                 elif option == '2':
                     self.private_room.join(username, conn)
-                    partner = self.private_partner.get(username)
-                    if partner is None:
-                        # Not paired yet, try to (user could type recipient name directly)
-                        self.handle_private_selection(username, conn, typed_candidate=msg)
-                        continue
-                    # Forward to partner if still online
+                    user_logger.info(f"[PRIVATE] {username} entered private messaging mode.")
+                    # Enter private messaging loop
+                    while True:
+                        conn.sendall(b"[Private] Type your message (or /menu to leave): ")
+                        data = conn.recv(1024)
+                        if not data:
+                            break
+                        msg = data.decode(errors="ignore").strip()
+                        logger.info(f"[INPUT] {username}@{addr} (private): {msg}")
+                        user_logger.info(f"[PRIVATE] {username}: {msg}")
+                        if msg == "/menu" or msg == "/exit":
+                            conn.sendall(b"[Private] Leaving private chat.\n")
+                            user_logger.info(f"[PRIVATE] {username} left private chat.")
+                            self.leave_private_if_any(username)
+                            break
+                        partner = self.private_partner.get(username)
+                        if partner is None:
+                            # Not paired yet, try to select
+                            self.handle_private_selection(username, conn, typed_candidate=msg)
+                            continue
+                        # Forward to partner if still online
+                        with self.lock:
+                            pconn = self.conn_by_user.get(partner)
+                        if pconn:
+                            pconn.sendall(f"[Private] {username}: {msg}\n".encode())
+                            # Optional echo back to sender
+                            conn.sendall(f"[Private -> {partner}] {msg}\n".encode())
+                            user_logger.info(f"[PRIVATE] {username} -> {partner}: {msg}")
+                        else:
+                            conn.sendall(b"[Private] Partner went offline. Returning to menu.\n")
+                            user_logger.info(f"[PRIVATE] {username}'s partner {partner} went offline.")
+                            self.leave_private_if_any(username)
+                            break
+                elif option == '3':
                     with self.lock:
-                        pconn = self.conn_by_user.get(partner)
-                    if pconn:
-                        pconn.sendall(f"[Private] {username}: {msg}\n".encode())
-                        # Optional echo back to sender
-                        conn.sendall(f"[Private -> {partner}] {msg}\n".encode())
-                    else:
-                        conn.sendall(b"[Private] Partner went offline. Returning to menu.\n")
-                        self.leave_private_if_any(username)
+                        online_users = [u for u in self.usernames if self.conn_by_user.get(u)]
+                    conn.sendall(f"Online users: {', '.join(online_users)}\n".encode())
+                elif option == '4':
+                    conn.sendall(b"Goodbye!\n")
+                    try:
+                        conn.shutdown(socket.SHUT_RDWR)
+                    except Exception:
+                        pass
+                    conn.close()
+                    break
+                else:
+                    conn.sendall(b"Invalid option. Please try again.\n")
 
         except Exception as e:
-            print(f"[ERROR] {addr}: {e}")
+            logger.error(f"[ERROR] {addr}: {e}")
+            user_logger.error(f"[ERROR] {username}@{addr}: {e}")
         finally:
             with self.lock:
                 if username:
@@ -159,8 +245,9 @@ class Server:
                     self.mode_by_user.pop(username, None)
                     self.private_partner.pop(username, None)
                     self.user_by_conn.pop(conn, None)
+                    user_logger.info(f"[LEAVE] {username} ({addr}) disconnected.")
                 self.addr_clients.discard(addr)
-                print(f"[LEAVE] {addr} disconnected. Total: {len(self.addr_clients)}")
+                logger.info(f"[LEAVE] {addr} disconnected. Total: {len(self.addr_clients)}")
             try:
                 conn.close()
             except Exception:
@@ -172,24 +259,30 @@ class Server:
             first = True
             while True:
                 if first:
-                    conn.sendall(f"[{room.room_id}] You: ".encode())
+                    conn.sendall(b"You: ")
                     first = False
                 data = conn.recv(1024)
                 if not data:
                     break
                 msg = data.decode().strip()
+                logger.info(f"[INPUT] {username} (chatroom {room.room_id}): {msg}")
+                user_logger.info(f"[CHATROOM] {username}@{room.room_id}: {msg}")
                 if not msg:
                     # Do nothing, do not re-send the prompt
                     continue  # Ignore empty input, prompt remains unchanged
                 if msg.lower() == '/leave':
                     conn.sendall(b"[ChatRoom] Leaving chat room.\n")
+                    user_logger.info(f"[CHATROOM] {username} left chat room {room.room_id}")
                     break
                 room.broadcast(username, msg)
-                conn.sendall(f"[{room.room_id}] You: ".encode())
-        except Exception:
-            pass
+                user_logger.info(f"[CHATROOM] {username} broadcast in {room.room_id}: {msg}")
+                conn.sendall(b"You: ")
+        except Exception as e:
+            logger.error(f"[ERROR] in chat room {room.room_id} for {username}: {e}")
+            user_logger.error(f"[ERROR] in chat room {room.room_id} for {username}: {e}")
         finally:
             room.remove(username, conn)
+            user_logger.info(f"[CHATROOM] {username} removed from chat room {room.room_id}")
 
     def handle_private_selection(self, username: str, conn: socket.socket, typed_candidate: Optional[str] = None):
         """List users, pick a recipient, pair both, then stay in private mode.
