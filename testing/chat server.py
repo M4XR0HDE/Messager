@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Enhanced Chat Server with Multiple Features
+Enhanced group Server with Multiple Features
 - Usernames/nicknames
 - Private messages
 - Chat rooms/channels
@@ -547,3 +547,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Server error: {e}")
         print(f"❌ Server error: {e}")
+
